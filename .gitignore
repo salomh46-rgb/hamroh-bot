@@ -1,0 +1,36 @@
+# Muhit va virtual env
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Ma'lumotlar bazasi
+*.db
+*.sqlite
+*.sqlite3
+hamroh_bot.db
+
+# Audio va media vaqtinchalik fayllar
+*.mp3
+*.ogg
+*.wav
+*.jpg
+*.jpeg
+*.png
+
+# IDE va muharrirlar
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Loglar
+*.log
+logs/
