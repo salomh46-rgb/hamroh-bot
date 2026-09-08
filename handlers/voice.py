@@ -1,4 +1,5 @@
 import os
+import io
 import time
 import logging
 from aiogram import Router, F, types
@@ -30,18 +31,18 @@ async def handle_voice_message(message: types.Message, bot: Bot):
 
     status_msg = await message.answer(loading_text_1)
 
-    temp_audio = f"voice_{user_id}_{int(time.time())}.ogg"
+    temp_audio_io = io.BytesIO()
     try:
-        # Telegramdan ovozli faylni yuklab olish
-        file_info = await bot.get_file(message.voice.file_id)
-        await bot.download_file(file_info.file_path, destination=temp_audio)
+        # Telegramdan ovozli faylni to'g'ridan-to'g'ri xotiraga (RAM) yuklab olish
+        await bot.download(message.voice, destination=temp_audio_io)
+        audio_bytes = temp_audio_io.getvalue()
 
         await status_msg.edit_text(loading_text_2)
 
-        # 1. Avval Gemini Multimodal Audio orqali sinab ko'ramiz (eng ishonchli va yuqori aniqlikda)
+        # 1. Gemini Multimodal Audio orqali xotiradagi baytlarni tahlil qilish
         history = await database.get_recent_chat_history(user_id, limit=6)
         ai_res = await gemini_service.process_voice_audio(
-            temp_audio, 
+            audio_bytes, 
             user_type=user_type, 
             history=history,
             lang=lang,
@@ -51,17 +52,10 @@ async def handle_voice_message(message: types.Message, bot: Bot):
         text = ai_res.get("transcribe", "")
         response_text = ai_res.get("response", "")
 
-        # 2. Agar Gemini transkripsiya bermasa, Whisper STT ga murojaat qilamiz
-        if not text:
-            text = await whisper_service.audio_to_text(temp_audio)
-            if text:
-                response_text = await gemini_service.chat_response(
-                    text, 
-                    user_type=user_type, 
-                    history=history,
-                    lang=lang,
-                    appeal=appeal
-                )
+        # 2. Agar Gemini transkripsiya bermasa, matnli chat fallback
+        if not text and not response_text:
+            await status_msg.edit_text(error_listen_text)
+            return
 
         if not response_text or (not text and "xatolik" in response_text.lower()):
             await status_msg.edit_text(error_listen_text)
@@ -74,45 +68,28 @@ async def handle_voice_message(message: types.Message, bot: Bot):
 
         await status_msg.delete()
 
-        # Ovozli javob (TTS) generatsiya qilish
-        voice_resp_file = f"resp_{user_id}_{int(time.time())}.mp3"
+        # Ovozli javobni xotirada (in-memory) hosil qilish
         import tts_service
-        audio_created = await tts_service.text_to_speech_file(
+        audio_resp_bytes = await tts_service.text_to_speech_bytes(
             response_text, 
-            voice_resp_file,
             lang=lang,
             gender=gender
         )
 
-        if audio_created:
-            voice_input = types.FSInputFile(voice_resp_file)
-            caption_text = f"🗣️ *\"{text}\"*\n\n🤖 {response_text}" if text else f"🤖 {response_text}"
-            # Telegram caption limiti 1024 belgi
+        caption_text = f"🗣️ *\"{text}\"*\n\n🤖 {response_text}" if text else f"🤖 {response_text}"
+
+        if audio_resp_bytes:
+            voice_input = types.BufferedInputFile(audio_resp_bytes, filename="voice_resp.mp3")
             if len(caption_text) > 1000:
                 await message.answer_voice(voice=voice_input)
                 await message.answer(caption_text)
             else:
                 await message.answer_voice(voice=voice_input, caption=caption_text)
-
-            if os.path.exists(voice_resp_file):
-                try:
-                    os.remove(voice_resp_file)
-                except Exception:
-                    pass
         else:
-            if text:
-                await message.answer(f"🗣️ *\"{text}\"*\n\n🤖 {response_text}")
-            else:
-                await message.answer(f"🤖 {response_text}")
-
+            await message.answer(caption_text)
 
     except Exception as e:
         logger.error(f"Ovozli xabarni qayta ishlashda xato: {e}")
         await status_msg.edit_text(f"Ovozni qabul qilishda nosozlik yuz berdi: {e}")
-    finally:
-        if os.path.exists(temp_audio):
-            try:
-                os.remove(temp_audio)
-            except Exception:
-                pass
+
 

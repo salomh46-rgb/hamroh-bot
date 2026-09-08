@@ -2,7 +2,7 @@ import os
 import time
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import database
 import gemini_service
 import tts_service
@@ -39,11 +39,9 @@ async def start_animal_quiz(message: types.Message, state: FSMContext):
 
     quiz_answers[user_id] = {"answer": answer, "fact": fact, "lang": lang}
 
-    # Audio savol
-    audio_file = f"anim_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(
+    # Audio savol (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(
         question,
-        audio_file,
         lang=lang,
         gender="female",
         rate="-2%"
@@ -55,13 +53,8 @@ async def start_animal_quiz(message: types.Message, state: FSMContext):
     caption = f"{title}\n\n❓ {question}\n\nQuyidagi variantlardan to'g'risini tanla:" if lang == "uz" else f"{title}\n\n❓ {question}\n\nВыбери правильный вариант:"
 
     kb = get_animal_kb(options, answer, lang)
-    if audio_path:
-        await message.answer_voice(voice=FSInputFile(audio_path), caption=caption, reply_markup=kb)
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
+    if audio_bytes:
+        await message.answer_voice(voice=BufferedInputFile(audio_bytes, filename="anim.mp3"), caption=caption, reply_markup=kb)
     else:
         await message.answer(caption, reply_markup=kb)
 

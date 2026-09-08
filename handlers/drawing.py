@@ -1,12 +1,13 @@
-import os
-import time
+import io
+import logging
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
-from aiogram.types import FSInputFile
+from aiogram.types import BufferedInputFile
 import database
 import gemini_service
 import tts_service
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 @router.message(F.text.in_(["🎨 Rasm chizish (AI)", "🎨 Мой рисунок (AI)"]))
@@ -35,7 +36,7 @@ async def prompt_drawing(message: types.Message, state: FSMContext):
 
 @router.message(F.photo)
 async def handle_child_drawing(message: types.Message, bot: Bot, state: FSMContext):
-    """Bolaning chizgan rasmini qabul qilish va Gemini Vision orqali tahlil qilish"""
+    """Bolaning chizgan rasmini qabul qilish va Gemini Vision orqali xotirada tahlil qilish"""
     await state.clear()
     user_id = message.from_user.id
     user = await database.get_user(user_id)
@@ -44,25 +45,22 @@ async def handle_child_drawing(message: types.Message, bot: Bot, state: FSMConte
     wait_text = "🎨 Rasmingni hayrat bilan tomosha qilyapman, bir daqiqa..." if lang == "uz" else "🎨 Внимательно рассматриваю твой рисунок, минуточку..."
     loading = await message.answer(wait_text)
 
-    # Eng katta o'lchamdagi rasmni yuklab olish
-    photo = message.photo[-1]
-    temp_img = f"drawing_{user_id}_{int(time.time())}.jpg"
-
     try:
-        file_info = await bot.get_file(photo.file_id)
-        await bot.download_file(file_info.file_path, destination=temp_img)
+        # Eng katta o'lchamdagi rasmni xotiraga (BytesIO) yuklab olish
+        photo = message.photo[-1]
+        photo_stream = io.BytesIO()
+        await bot.download(photo, destination=photo_stream)
+        photo_bytes = photo_stream.getvalue()
 
         # Gemini Vision orqali tahlil
-        analysis_text = await gemini_service.analyze_child_drawing(temp_img, lang=lang)
+        analysis_text = await gemini_service.analyze_child_drawing(photo_bytes, lang=lang)
 
         # Ball qo'shish (+15 ball)
         new_points = await database.add_user_points(user_id, 15)
 
-        # Ovozli maqtov (TTS)
-        voice_file = f"draw_voice_{user_id}_{int(time.time())}.mp3"
-        audio_path = await tts_service.text_to_speech_file(
+        # Ovozli maqtov (TTS in-memory)
+        audio_bytes = await tts_service.text_to_speech_bytes(
             analysis_text,
-            voice_file,
             lang=lang,
             gender="female",
             rate="-2%"
@@ -83,24 +81,15 @@ async def handle_child_drawing(message: types.Message, bot: Bot, state: FSMConte
             f"🏆 Всего баллов: **{new_points} баллов**"
         )
 
-        if audio_path:
+        if audio_bytes:
             await message.answer_voice(
-                voice=FSInputFile(audio_path),
+                voice=BufferedInputFile(audio_bytes, filename="draw.mp3"),
                 caption=caption
             )
-            if os.path.exists(audio_path):
-                try:
-                    os.remove(audio_path)
-                except Exception:
-                    pass
         else:
             await message.answer(caption)
 
     except Exception as e:
-        await loading.edit_text(f"Rasmni tahlil qilishda nosozlik yuz berdi: {e}")
-    finally:
-        if os.path.exists(temp_img):
-            try:
-                os.remove(temp_img)
-            except Exception:
-                pass
+        logger.error(f"Rasmni tahlil qilishda nosozlik: {e}")
+        err_msg = "Rasmni tahlil qilishda nosozlik yuz berdi." if lang == "uz" else "Произошла ошибка при анализе рисунка."
+        await loading.edit_text(f"{err_msg}: {e}")

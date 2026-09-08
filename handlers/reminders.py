@@ -233,4 +233,130 @@ async def delete_reminder_action(callback: types.CallbackQuery):
         await callback.answer(err, show_alert=True)
     await callback.answer()
 
+@router.callback_query(F.data.startswith("med_taken:"))
+async def on_med_taken(callback: types.CallbackQuery):
+    """Foydalanuvchi [✅ Dorini ichdim] tugmasini bosganda tasdiqlash va ball berish"""
+    user_id = callback.from_user.id
+    user = await database.get_user(user_id)
+    lang = user.get("language", "uz") if user else "uz"
+    appeal = user.get("appeal") or user.get("name") or ("qadrdonimiz" if lang == "uz" else "дорогой друг")
+
+    parts = callback.data.split(":")
+    log_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+
+    if log_id:
+        await database.mark_reminder_taken(log_id, user_id)
+
+    # Foydalanuvchiga +5 salomatlik balli
+    await database.add_user_points(user_id, 5)
+
+    if lang == "ru":
+        alert_text = f"Прекрасно, {appeal}! Лекарство принято вовремя. Крепкого здоровья! 🌸"
+        badge_text = "✅ Принято вовремя 🌸"
+    else:
+        alert_text = f"Ofarin, {appeal}! Dorini o'z vaqtida qabul qildingiz. Hamisha sog'-omon bo'ling! 🌸"
+        badge_text = "✅ O'z vaqtida ichildi 🌸"
+
+    await callback.answer(alert_text, show_alert=True)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=badge_text, callback_data="none")]
+        ]))
+    except Exception:
+        pass
+
+@router.callback_query(F.data.startswith("reminder:report"))
+@router.message(F.text.in_(["📊 Salomatlik hisoboti", "📊 Salomatlik va dori hisoboti", "📊 Отчёт о приёме лекарств", "📊 Отчёт о здоровье"]))
+async def show_health_report_handler(event: types.Message | types.CallbackQuery):
+    """Haftalik yoki oylik salomatlik / dori intizomi hisobotini chiroyli grafik bilan chiqarish"""
+    is_callback = isinstance(event, types.CallbackQuery)
+    message = event.message if is_callback else event
+    user_id = event.from_user.id
+    user = await database.get_user(user_id)
+    lang = user.get("language", "uz") if user else "uz"
+    appeal = user.get("appeal") or user.get("name") or ("qadrdonimiz" if lang == "uz" else "дорогой друг")
+
+    days = 7
+    if is_callback and ":" in event.data:
+        parts = event.data.split(":")
+        if len(parts) >= 3 and parts[2].isdigit():
+            days = int(parts[2])
+
+    report = await database.get_health_report(user_id, days=days)
+    total = report["total"]
+    taken = report["taken"]
+    missed = report["missed"]
+    rate = report["rate"]
+    recent = report["recent_logs"]
+
+    filled = min(10, max(0, int(round(rate / 10))))
+    bar = "🟩" * filled + "⬜" * (10 - filled)
+
+    if lang == "ru":
+        period_text = f"{days} дней"
+        title = f"📊 **ОТЧЁТ О ПРИЁМЕ ЛЕКАРСТВ ({period_text.upper()}):**\n\n"
+        greeting = f"👵 Дорогой(ая) **{appeal}**! Вот ваша дисциплина здоровья:\n\n"
+        progress = f"📈 **Соблюдение графика:** `{rate}%`\n`[{bar}]`\n\n"
+        stats = (
+            f"📋 **Статистика за {days} дней:**\n"
+            f"• Всего напоминаний: **{total}**\n"
+            f"• Принято вовремя: **{taken}** ✅\n"
+            f"• Пропущено / не отмечено: **{missed}** ⚠️\n\n"
+        )
+        if rate >= 80:
+            advice = "💡 *Совет доктора:* Замечательный результат! Вы заботитесь о здоровье, продолжайте в том же духе! 🌸\n\n"
+        else:
+            advice = "💡 *Совет доктора:* Не забывайте вовремя принимать назначенные лекарства. Ваше здоровье — самое дорогое! 🌿\n\n"
+
+        logs_header = "📝 **Последние приёмы:**\n"
+        logs_str = ""
+        for item in recent[:6]:
+            st = "✅ Принято" if item["status"] == "taken" else "⚠️ Ожидание"
+            logs_str += f"• 💊 {item['dori_nomi']} ({item.get('scheduled_time', '')}) — {st}\n"
+        if not logs_str:
+            logs_str = "• Записей о приёме пока нет.\n"
+
+        other_days = 30 if days == 7 else 7
+        toggle_btn = f"📅 Показать за {other_days} дней"
+    else:
+        period_text = f"{days} kunlik"
+        title = f"📊 **SALOMATLIK VA DORI HISOBOTI ({period_text.upper()}):**\n\n"
+        greeting = f"👵 Hurmatli **{appeal}**! Sizning dori qabul qilish intizomingiz:\n\n"
+        progress = f"📈 **Grafik intizomi:** `{rate}%`\n`[{bar}]`\n\n"
+        stats = (
+            f"📋 **{days} kunlik ko'rsatkichlar:**\n"
+            f"• Yuborilgan eslatmalar: **{total} ta**\n"
+            f"• O'z vaqtida ichilgan: **{taken} ta** ✅\n"
+            f"• E'tibordan chetda qolgan: **{missed} ta** ⚠️\n\n"
+        )
+        if rate >= 80:
+            advice = "💡 *Shifokor tavsiyasi:* Ajoyib natija! O'z salomatligingizga mas'uliyat bilan qarayotganingiz quvonarli! 🌸\n\n"
+        else:
+            advice = "💡 *Shifokor tavsiyasi:* Shifokor yozib bergan dorilarni o'z vaqtida ichishga harakat qiling. Salomatlik — eng oliy boylik! 🌿\n\n"
+
+        logs_header = "📝 **Oxirgi qaydlar:**\n"
+        logs_str = ""
+        for item in recent[:6]:
+            st = "✅ Ichildi" if item["status"] == "taken" else "⚠️ Kutilmoqda"
+            logs_str += f"• 💊 {item['dori_nomi']} ({item.get('scheduled_time', '')}) — {st}\n"
+        if not logs_str:
+            logs_str = "• Hozircha dori qabul qilish qaydlari yo'q.\n"
+
+        other_days = 30 if days == 7 else 7
+        toggle_btn = f"📅 {other_days} kunlik hisobotni ko'rish"
+
+    full_text = f"{title}{greeting}{progress}{stats}{advice}{logs_header}{logs_str}"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_btn, callback_data=f"reminder:report:{other_days}")],
+        [InlineKeyboardButton(text="➕ Yangi eslatma qo'shish" if lang == "uz" else "➕ Добавить напоминание", callback_data="reminder:add")]
+    ])
+
+    if is_callback:
+        await event.message.edit_text(full_text, reply_markup=kb)
+        await event.answer()
+    else:
+        await message.answer(full_text, reply_markup=kb)
+
+
 

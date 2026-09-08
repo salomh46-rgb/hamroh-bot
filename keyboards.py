@@ -68,11 +68,13 @@ def get_reminders_kb(lang: str = "uz") -> InlineKeyboardMarkup:
     if lang == "ru":
         buttons = [
             [InlineKeyboardButton(text="➕ Добавить напоминание", callback_data="reminder:add")],
-            [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="reminder:list")]
+            [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="reminder:list")],
+            [InlineKeyboardButton(text="📊 Отчёт о приёме лекарств", callback_data="reminder:report")]
         ]
     else:
         buttons = [
             [InlineKeyboardButton(text="➕ Yangi dori eslatmasi qo'shish", callback_data="reminder:add")],
-            [InlineKeyboardButton(text="📋 Barcha eslatmalarim", callback_data="reminder:list")]
+            [InlineKeyboardButton(text="📋 Barcha eslatmalarim", callback_data="reminder:list")],
+            [InlineKeyboardButton(text="📊 Salomatlik va dori hisoboti", callback_data="reminder:report")]
         ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

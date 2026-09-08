@@ -1,7 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import os
 import time
 import gemini_service
@@ -88,11 +88,9 @@ async def process_ertak_mavzu(message: types.Message, state: FSMContext):
     ertak_matni = await gemini_service.generate_ertak(mavzu, yosh=7, lang=lang)
     new_points = await database.add_user_points(message.from_user.id, 10)
     
-    # Audio ertak generatsiya qilish
-    ertak_audio_file = f"ertak_{message.from_user.id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(
+    # Audio ertak generatsiya qilish (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(
         ertak_matni, 
-        ertak_audio_file, 
         lang=lang, 
         gender="female", 
         rate="-3%"
@@ -115,15 +113,10 @@ async def process_ertak_mavzu(message: types.Message, state: FSMContext):
         )
         text_prefix = "📖 **Ertak matni:**"
 
-    if audio_path:
-        voice_in = FSInputFile(audio_path)
+    if audio_bytes:
+        voice_in = BufferedInputFile(audio_bytes, filename="ertak.mp3")
         await message.answer_voice(voice=voice_in, caption=caption_text)
         await message.answer(f"{text_prefix}\n\n{ertak_matni}")
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
     else:
         await message.answer(f"{caption_text}\n\n{ertak_matni}")
 

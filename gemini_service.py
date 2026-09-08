@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Union
 from google import genai
 from google.genai import types
 import config
@@ -224,26 +224,29 @@ Javob variantlari (A, B, C) bo'lsin va oxirida to'g'ri javob ko'rsatilsin (yashi
         return "Quyosh nima uchun kunduzi charaqlaydi? Bilasanmi, do'stim?"
 
 async def process_voice_audio(
-    audio_path: str, 
+    audio_data: Any, 
     user_type: str = "keksa", 
     history: Optional[List[Dict[str, str]]] = None,
     lang: str = "uz",
     appeal: str = ""
 ) -> Dict[str, str]:
-    """Ovozli xabarni to'g'ridan-to'g'ri Gemini Multimodal orqali tushunish va javob berish (O'zbek / Rus)"""
+    """Ovozli xabarni to'g'ridan-to'g'ri Gemini Multimodal orqali tushunish va javob berish (Bytes yoki Path)"""
     client = get_client()
     if not client:
         return {"transcribe": "", "response": "Gemini API kaliti kiritilmagan."}
 
     try:
-        with open(audio_path, "rb") as f:
-            audio_bytes = f.read()
-
-        mime_type = "audio/ogg"
-        if audio_path.endswith(".wav"):
-            mime_type = "audio/wav"
-        elif audio_path.endswith(".mp3"):
-            mime_type = "audio/mp3"
+        if isinstance(audio_data, bytes):
+            audio_bytes = audio_data
+            mime_type = "audio/ogg"
+        else:
+            with open(audio_data, "rb") as f:
+                audio_bytes = f.read()
+            mime_type = "audio/ogg"
+            if str(audio_data).endswith(".wav"):
+                mime_type = "audio/wav"
+            elif str(audio_data).endswith(".mp3"):
+                mime_type = "audio/mp3"
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
 
@@ -307,19 +310,22 @@ async def process_voice_audio(
         logger.error(f"Gemini ovozli xabar tahlilida xatolik: {e}")
         return {"transcribe": "", "response": f"Ovozni qayta ishlashda xatolik yuz berdi: {e}"}
 
-async def analyze_child_drawing(image_path: str, lang: str = "uz") -> str:
-    """Bolalar chizgan rasmini Gemini Vision (AI) orqali mehr bilan tahlil qilish va maqtash"""
+async def analyze_child_drawing(image_data: Any, lang: str = "uz") -> str:
+    """Bolalar chizgan rasmini Gemini Vision (AI) orqali mehr bilan tahlil qilish va maqtash (Bytes yoki Path)"""
     client = get_client()
     if not client:
         return "Ofarin, juda chiroyli rasm chizibsan!" if lang == "uz" else "Молодец! Очень красивый рисунок!"
 
     try:
-        with open(image_path, "rb") as f:
-            image_bytes = f.read()
-
-        mime = "image/jpeg"
-        if image_path.lower().endswith(".png"):
-            mime = "image/png"
+        if isinstance(image_data, bytes):
+            image_bytes = image_data
+            mime = "image/jpeg"
+        else:
+            with open(image_data, "rb") as f:
+                image_bytes = f.read()
+            mime = "image/jpeg"
+            if str(image_data).lower().endswith(".png"):
+                mime = "image/png"
 
         image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
 

@@ -3,7 +3,7 @@ import time
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import database
 import gemini_service
 import tts_service
@@ -35,11 +35,9 @@ async def show_reading_mission(message: types.Message, state: FSMContext):
     task_text = task_data.get("task", "Bugun sevimli kitobingdan 5 sahifa o'qiymiz!")
     tip_text = task_data.get("tip", "Kitob o'qigan bola har doim eng bilimdon bo'ladi!")
 
-    # Audio ovoz
-    audio_file = f"read_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(
+    # Audio ovoz (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(
         f"{task_text} {tip_text}",
-        audio_file,
         lang=lang,
         gender="female",
         rate="-2%"
@@ -60,13 +58,8 @@ async def show_reading_mission(message: types.Message, state: FSMContext):
         f"Когда прочитаешь 5 страниц, нажми кнопку '✅ Прочитал' ниже и расскажи в сообщении, о чём была книга! За это ты получишь **+10 баллов**! 🌟"
     )
 
-    if audio_path:
-        await message.answer_voice(voice=FSInputFile(audio_path), caption=caption, reply_markup=get_reading_kb(lang))
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
+    if audio_bytes:
+        await message.answer_voice(voice=BufferedInputFile(audio_bytes, filename="read.mp3"), caption=caption, reply_markup=get_reading_kb(lang))
     else:
         await message.answer(caption, reply_markup=get_reading_kb(lang))
 

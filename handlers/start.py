@@ -5,7 +5,7 @@ from aiogram import Router, F, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import FSInputFile
+from aiogram.types import BufferedInputFile
 import database
 import keyboards
 import gemini_service
@@ -155,22 +155,18 @@ async def process_elderly_name(message: types.Message, state: FSMContext):
     )
 
     # Ovozli salom yuborish (Madina/Svetlana yoki Sardor/Dmitry ovozida)
-    voice_file = f"welcome_{user_id}_{int(time.time())}.mp3"
     try:
-        created = await tts_service.text_to_speech_file(
+        audio_bytes = await tts_service.text_to_speech_bytes(
             text=audio_text,
-            output_path=voice_file,
             lang=lang,
             gender=gender
         )
-        if created:
-            voice_input = FSInputFile(voice_file)
+        if audio_bytes:
+            voice_input = BufferedInputFile(audio_bytes, filename="welcome.mp3")
             await message.answer_voice(
                 voice=voice_input,
                 caption="🎙️ *Ovozli salomlashuv*" if lang == "uz" else "🎙️ *Голосовое приветствие*"
             )
-            if os.path.exists(voice_file):
-                os.remove(voice_file)
     except Exception as e:
         logger.error(f"Xush kelibsiz ovozini yuborishda xato: {e}")
 

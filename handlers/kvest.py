@@ -3,7 +3,7 @@ import time
 import json
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import gemini_service
 import database
 import tts_service
@@ -82,9 +82,8 @@ async def start_quest(message: types.Message, state: FSMContext):
 
     user_quests[user_id]["history"] = story
 
-    # Audio ovoz
-    audio_file = f"quest_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(story, audio_file, lang=lang, gender="female", rate="-2%")
+    # Audio ovoz (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(story, lang=lang, gender="female", rate="-2%")
 
     await loading.delete()
 
@@ -96,14 +95,9 @@ async def start_quest(message: types.Message, state: FSMContext):
     title = "🗺️ **ВОЛШЕБНЫЙ КВЕСТ (ШАГ 1):**" if lang == "ru" else "🗺️ **SEHRLI KVEST (1-QADAM):**"
     full_caption = f"{title}\n\n{story}"
 
-    if audio_path:
-        voice_in = FSInputFile(audio_path)
+    if audio_bytes:
+        voice_in = BufferedInputFile(audio_bytes, filename="quest.mp3")
         await message.answer_voice(voice=voice_in, caption=full_caption, reply_markup=kb)
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
     else:
         await message.answer(full_caption, reply_markup=kb)
 
@@ -152,8 +146,7 @@ async def continue_quest(callback: types.CallbackQuery):
 
         new_points = await database.add_user_points(user_id, 25) # Katta mukofot!
 
-        audio_file = f"quest_end_{user_id}_{int(time.time())}.mp3"
-        audio_path = await tts_service.text_to_speech_file(final_story, audio_file, lang=lang, gender="female", rate="-2%")
+        audio_bytes = await tts_service.text_to_speech_bytes(final_story, lang=lang, gender="female", rate="-2%")
 
         await loading.delete()
 
@@ -178,14 +171,9 @@ async def continue_quest(callback: types.CallbackQuery):
             [InlineKeyboardButton(text=restart_btn, callback_data="quest:restart")]
         ])
 
-        if audio_path:
-            voice_in = FSInputFile(audio_path)
+        if audio_bytes:
+            voice_in = BufferedInputFile(audio_bytes, filename="quest_end.mp3")
             await callback.message.answer_voice(voice=voice_in, caption=win_caption, reply_markup=kb)
-            if os.path.exists(audio_path):
-                try:
-                    os.remove(audio_path)
-                except Exception:
-                    pass
         else:
             await callback.message.answer(win_caption, reply_markup=kb)
 
@@ -245,8 +233,7 @@ async def continue_quest(callback: types.CallbackQuery):
     user_quests[user_id]["step"] = step
     user_quests[user_id]["history"] += f" -> {mid_story}"
 
-    audio_file = f"quest_step2_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(mid_story, audio_file, lang=lang, gender="female", rate="-2%")
+    audio_bytes = await tts_service.text_to_speech_bytes(mid_story, lang=lang, gender="female", rate="-2%")
 
     await loading.delete()
 
@@ -258,14 +245,9 @@ async def continue_quest(callback: types.CallbackQuery):
     title = f"🗺️ **ВОЛШЕБНЫЙ КВЕСТ (ШАГ {step}):**" if lang == "ru" else f"🗺️ **SEHRLI KVEST ({step}-QADAM):**"
     full_caption = f"{title}\n\n{mid_story}"
 
-    if audio_path:
-        voice_in = FSInputFile(audio_path)
+    if audio_bytes:
+        voice_in = BufferedInputFile(audio_bytes, filename="quest_step2.mp3")
         await callback.message.answer_voice(voice=voice_in, caption=full_caption, reply_markup=kb)
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
     else:
         await callback.message.answer(full_caption, reply_markup=kb)
 

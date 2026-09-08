@@ -3,7 +3,7 @@ import time
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import database
 import gemini_service
 import tts_service
@@ -33,11 +33,9 @@ async def start_memory_exercise(message: types.Message, state: FSMContext):
 
     question = await gemini_service.generate_memory_question(lang=lang, appeal=appeal)
 
-    # Audio ovoz yaratish
-    audio_file = f"mem_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(
+    # Audio ovoz yaratish (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(
         question, 
-        audio_file, 
         lang=lang, 
         gender=gender, 
         rate="-4%"
@@ -56,13 +54,8 @@ async def start_memory_exercise(message: types.Message, state: FSMContext):
     await state.set_state(MemoryStates.waiting_for_memory_answer)
     await state.update_data(lang=lang, gender=gender, appeal=appeal)
 
-    if audio_path:
-        await message.answer_voice(voice=FSInputFile(audio_path), caption=caption, reply_markup=get_memory_kb(lang))
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
+    if audio_bytes:
+        await message.answer_voice(voice=BufferedInputFile(audio_bytes, filename="mem.mp3"), caption=caption, reply_markup=get_memory_kb(lang))
     else:
         await message.answer(caption, reply_markup=get_memory_kb(lang))
 
@@ -103,21 +96,14 @@ async def process_memory_answer(message: types.Message, state: FSMContext):
         except Exception:
             pass
 
-    # Audio feedback
-    voice_file = f"mem_fb_{message.from_user.id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(
+    # Audio feedback (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(
         feedback, 
-        voice_file, 
         lang=lang, 
         gender=gender
     )
 
-    if audio_path:
-        await message.answer_voice(voice=FSInputFile(audio_path), caption=f"🌸 {feedback}")
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
+    if audio_bytes:
+        await message.answer_voice(voice=BufferedInputFile(audio_bytes, filename="mem_fb.mp3"), caption=f"🌸 {feedback}")
     else:
         await message.answer(f"🌸 {feedback}")

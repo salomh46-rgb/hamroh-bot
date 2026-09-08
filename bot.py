@@ -25,9 +25,26 @@ async def main():
 
     logger.info("Hamroh Bot ishga tushirilmoqda...")
 
+    # FSM Storage (Redis bo'lsa Redis, aks holda xavfsiz MemoryStorage)
+    storage = None
+    if config.REDIS_URL:
+        try:
+            import redis.asyncio as aioredis
+            from aiogram.fsm.storage.redis import RedisStorage
+
+            r_client = aioredis.from_url(config.REDIS_URL)
+            await r_client.ping()
+            storage = RedisStorage(redis=r_client)
+            logger.info("FSM Storage: RedisStorage faol (Qayta yonganda ham foydalanuvchi ma'lumotlari saqlanadi).")
+        except Exception as e:
+            logger.warning(f"Redis server topilmadi yoki ulanishda xato ({e}). Standart MemoryStorage ishga tushiriladi.")
+            storage = MemoryStorage()
+    else:
+        storage = MemoryStorage()
+
     # Bot va Dispatcher obyektlari
     bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=storage)
 
     # Tugmalarni ketma-ket qayta-qayta bosishdan (Anti-Flood) himoya qilish
     from middlewares import AntiFloodMiddleware

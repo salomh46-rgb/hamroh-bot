@@ -26,6 +26,41 @@ def clean_text_for_speech(text: str) -> str:
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean
 
+import io
+
+async def text_to_speech_bytes(
+    text: str, 
+    lang: str = "uz", 
+    gender: str = "female", 
+    rate: str = "-4%"
+) -> Optional[bytes]:
+    """
+    Matnni xotirada (in-memory io.BytesIO) neyron ovozga aylantirish.
+    Diskka yozmaydi, juda tez va PermissionError lardan holi!
+    """
+    try:
+        clean_text = clean_text_for_speech(text)
+        if not clean_text:
+            return None
+
+        voice = get_voice(lang=lang, gender=gender)
+        communicate = edge_tts.Communicate(
+            text=clean_text,
+            voice=voice,
+            rate=rate
+        )
+        buffer = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                buffer.write(chunk["data"])
+        
+        val = buffer.getvalue()
+        if val and len(val) > 0:
+            return val
+    except Exception as e:
+        logger.error(f"TTS ovoz baytlarini olishda xatolik ({lang}): {e}")
+    return None
+
 async def text_to_speech_file(
     text: str, 
     output_path: str, 
@@ -34,24 +69,16 @@ async def text_to_speech_file(
     rate: str = "-4%"
 ) -> Optional[str]:
     """
-    Matnni o'zbek yoki rus tilidagi tabiiy neyron ovozga aylantirish.
+    Matnni diskdagi faylga aylantirish (orqaga moslik uchun saqlangan).
     """
     try:
-        clean_text = clean_text_for_speech(text)
-        if not clean_text:
-            return None
-
-        voice = get_voice(lang=lang, gender=gender)
-
-        communicate = edge_tts.Communicate(
-            text=clean_text,
-            voice=voice,
-            rate=rate
-        )
-        await communicate.save(output_path)
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        audio_bytes = await text_to_speech_bytes(text, lang=lang, gender=gender, rate=rate)
+        if audio_bytes:
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes)
             return output_path
     except Exception as e:
-        logger.error(f"TTS ovoz hosil qilishda xatolik ({lang}/{voice}): {e}")
+        logger.error(f"TTS fayl yozishda xato: {e}")
     return None
+
 

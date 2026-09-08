@@ -31,3 +31,6 @@ DATABASE_URL: str = os.getenv(
     f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
+REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+

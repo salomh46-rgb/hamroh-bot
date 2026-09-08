@@ -2,7 +2,7 @@ import os
 import time
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import gemini_service
 import database
 import tts_service
@@ -80,9 +80,8 @@ async def send_quiz(message: types.Message, state: FSMContext):
     last_quiz_answers[user_id] = ans_text
     new_points = await database.add_user_points(user_id, 5)
 
-    # Audio ovoz hosil qilish
-    audio_file = f"quiz_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(quiz_text, audio_file, lang=lang, gender="female", rate="-2%")
+    # Audio ovoz hosil qilish (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(quiz_text, lang=lang, gender="female", rate="-2%")
 
     await loading.delete()
 
@@ -99,14 +98,9 @@ async def send_quiz(message: types.Message, state: FSMContext):
             f"⭐ Topshiriqni o'ylaganing uchun +5 ball! (Jami: {new_points} ball)"
         )
 
-    if audio_path:
-        voice_in = FSInputFile(audio_path)
+    if audio_bytes:
+        voice_in = BufferedInputFile(audio_bytes, filename="quiz.mp3")
         await message.answer_voice(voice=voice_in, caption=full_caption, reply_markup=get_quiz_kb(lang))
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
     else:
         await message.answer(full_caption, reply_markup=get_quiz_kb(lang))
 

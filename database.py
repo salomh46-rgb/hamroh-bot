@@ -73,6 +73,18 @@ async def init_sqlite():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS reminder_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reminder_id INTEGER,
+                user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                dori_nomi TEXT NOT NULL,
+                scheduled_time VARCHAR(5),
+                status TEXT DEFAULT 'sent',
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                taken_at TIMESTAMP
+            );
+        """)
         await conn.commit()
     logger.info("SQLite jadvallari muvaffaqiyatli ishga tushirildi.")
 
@@ -129,6 +141,18 @@ async def init_db():
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS reminder_logs (
+                    id SERIAL PRIMARY KEY,
+                    reminder_id INTEGER,
+                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
+                    dori_nomi TEXT NOT NULL,
+                    scheduled_time VARCHAR(5),
+                    status TEXT DEFAULT 'sent',
+                    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    taken_at TIMESTAMP
                 );
             """)
         logger.info("PostgreSQL ma'lumotlar bazasi faol.")
@@ -400,4 +424,118 @@ async def get_system_stats() -> Dict[str, int]:
             premium = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_premium = TRUE")
             return {"users": users or 0, "reminders": reminders or 0, "premium": premium or 0}
     return {"users": 0, "reminders": 0, "premium": 0}
+
+async def log_reminder(reminder_id: int, user_id: int, dori_nomi: str, scheduled_time: str) -> int:
+    """Yuborilgan dori eslatmasini monitoring uchun qayd etish"""
+    if is_sqlite:
+        async with aiosqlite.connect(SQLITE_PATH) as conn:
+            cur = await conn.execute("""
+                INSERT INTO reminder_logs (reminder_id, user_id, dori_nomi, scheduled_time, status)
+                VALUES (?, ?, ?, ?, 'sent')
+            """, (reminder_id, user_id, dori_nomi, scheduled_time))
+            await conn.commit()
+            return cur.lastrowid or 0
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            return await conn.fetchval("""
+                INSERT INTO reminder_logs (reminder_id, user_id, dori_nomi, scheduled_time, status)
+                VALUES ($1, $2, $3, $4, 'sent')
+                RETURNING id;
+            """, reminder_id, user_id, dori_nomi, scheduled_time) or 0
+    return 0
+
+async def mark_reminder_taken(log_id: int, user_id: int) -> bool:
+    """Foydalanuvchi dori ichganini tasdiqlaganda holatni yangilash"""
+    if is_sqlite:
+        async with aiosqlite.connect(SQLITE_PATH) as conn:
+            cur = await conn.execute("""
+                UPDATE reminder_logs 
+                SET status = 'taken', taken_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+            """, (log_id, user_id))
+            await conn.commit()
+            return cur.rowcount > 0
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            res = await conn.execute("""
+                UPDATE reminder_logs 
+                SET status = 'taken', taken_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND user_id = $2
+            """, log_id, user_id)
+            return "UPDATE 1" in res
+    return False
+
+async def get_health_report(user_id: int, days: int = 7) -> Dict[str, Any]:
+    """Haftalik yoki oylik dori qabul qilish va sog'liq hisoboti"""
+    if is_sqlite:
+        async with aiosqlite.connect(SQLITE_PATH) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'taken' THEN 1 ELSE 0 END) as taken,
+                    SUM(CASE WHEN status != 'taken' THEN 1 ELSE 0 END) as missed
+                FROM reminder_logs
+                WHERE user_id = ? AND sent_at >= datetime('now', ?)
+            """, (user_id, f"-{days} days")) as cur:
+                stat_row = await cur.fetchone()
+                total = stat_row["total"] if stat_row and stat_row["total"] else 0
+                taken = stat_row["taken"] if stat_row and stat_row["taken"] else 0
+                missed = stat_row["missed"] if stat_row and stat_row["missed"] else 0
+
+            async with conn.execute("""
+                SELECT id, dori_nomi, scheduled_time, status, sent_at, taken_at
+                FROM reminder_logs
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT 10
+            """, (user_id,)) as cur:
+                recent_rows = await cur.fetchall()
+                recent_logs = [dict(r) for r in recent_rows]
+
+            rate = round((taken / total * 100), 1) if total > 0 else 100.0
+            return {
+                "total": total,
+                "taken": taken,
+                "missed": missed,
+                "rate": rate,
+                "recent_logs": recent_logs,
+                "days": days
+            }
+
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE status = 'taken') as taken,
+                    COUNT(*) FILTER (WHERE status != 'taken') as missed
+                FROM reminder_logs
+                WHERE user_id = $1 AND sent_at >= NOW() - ($2 || ' days')::interval
+            """, user_id, str(days))
+            total = row["total"] if row and row["total"] else 0
+            taken = row["taken"] if row and row["taken"] else 0
+            missed = row["missed"] if row and row["missed"] else 0
+
+            recent_rows = await conn.fetch("""
+                SELECT id, dori_nomi, scheduled_time, status, sent_at, taken_at
+                FROM reminder_logs
+                WHERE user_id = $1
+                ORDER BY id DESC
+                LIMIT 10
+            """, user_id)
+            recent_logs = [dict(r) for r in recent_rows]
+
+            rate = round((taken / total * 100), 1) if total > 0 else 100.0
+            return {
+                "total": total,
+                "taken": taken,
+                "missed": missed,
+                "rate": rate,
+                "recent_logs": recent_logs,
+                "days": days
+            }
+
+    return {"total": 0, "taken": 0, "missed": 0, "rate": 100.0, "recent_logs": [], "days": days}
+
 

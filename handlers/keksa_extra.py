@@ -2,7 +2,7 @@ import os
 import time
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 import database
 import gemini_service
 import tts_service
@@ -125,11 +125,9 @@ async def send_wisdom_story(message: types.Message, state: FSMContext):
         except Exception:
             pass
 
-    # Audio ovoz yaratish
-    audio_file = f"wisdom_{user_id}_{int(time.time())}.mp3"
-    audio_path = await tts_service.text_to_speech_file(
+    # Audio ovoz yaratish (in-memory BytesIO)
+    audio_bytes = await tts_service.text_to_speech_bytes(
         story_text, 
-        audio_file, 
         lang=lang, 
         gender=gender, 
         rate="-4%"
@@ -140,14 +138,9 @@ async def send_wisdom_story(message: types.Message, state: FSMContext):
     title = "📿 **МУДРАЯ ПРИТЧА ДЛЯ ДУШИ:**" if lang == "ru" else "📿 **QALB OROMI — HIKMAT:**"
     caption_text = f"{title}\n\n{story_text}"
 
-    if audio_path:
-        voice_in = FSInputFile(audio_path)
+    if audio_bytes:
+        voice_in = BufferedInputFile(audio_bytes, filename="wisdom.mp3")
         await message.answer_voice(voice=voice_in, caption=caption_text)
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except Exception:
-                pass
     else:
         await message.answer(caption_text)
 
