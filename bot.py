@@ -29,6 +29,11 @@ async def main():
     bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Tugmalarni ketma-ket qayta-qayta bosishdan (Anti-Flood) himoya qilish
+    from middlewares import AntiFloodMiddleware
+    dp.message.middleware(AntiFloodMiddleware(limit_seconds=2.0))
+    dp.callback_query.middleware(AntiFloodMiddleware(limit_seconds=1.5))
+
     # Routerlarni ulash
     for router in all_routers:
         dp.include_router(router)
