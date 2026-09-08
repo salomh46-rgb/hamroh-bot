@@ -66,6 +66,24 @@ async def on_lang_selected(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer(text, reply_markup=keyboards.get_role_selection_kb(lang))
     await callback.answer()
 
+from typing import Optional
+
+ALL_MAIN_MENU_TEXTS = [
+    # Uzbek
+    "💊 Dori eslatmalari", "📞 Shifokor / SOS", "🧠 Xotira mashqlari", "🎵 Oltin taronalar",
+    "📻 Foydali videolar", "📿 Hikmat va Rivoyat", "🎙️ Ovozli suhbat", "⚙️ Rejim / Til",
+    "🗺️ Kvest-Ertak", "🎨 Rasm chizish (AI)", "📚 Kitobxonlik", "🎮 Hayvonlar olami",
+    "📖 Ertak eshitish", "🏆 Ballarim",
+    # Russian
+    "💊 Напоминания", "📞 Врач / SOS", "🧠 Тренировка памяти", "🎵 Ретро-музыка",
+    "📻 Полезные видео", "📿 Мудрые притчи", "🎙️ Голосовой собеседник", "⚙️ Режим / Язык",
+    "🗺️ Квест-Сказка", "🎨 Мой рисунок (AI)", "📚 Чтение книг", "🎮 Мир животных",
+    "📖 Слушать сказку", "🏆 Мои баллы",
+    # Extra commands & buttons
+    "ℹ️ Yordam", "ℹ️ Помощь", "yordam", "help", "/help", "/sos", "/start", "/role",
+    "📊 Salomatlik hisoboti", "📊 Отчёт о здоровье"
+]
+
 @router.callback_query(F.data.startswith("set_role:"))
 async def on_role_selected(callback: types.CallbackQuery, state: FSMContext):
     """Rejim tanlanganda ishlaydi"""
@@ -89,13 +107,26 @@ async def on_role_selected(callback: types.CallbackQuery, state: FSMContext):
                 "Чтобы наше общение было тёплым и уважительным, подскажите, пожалуйста, ваше имя?\n"
                 "(Например: *Каролина*, *Александр*, *Нина Ивановна*...)"
             )
+            skip_btn = "⏭️ Пропустить этот шаг"
+            skip_prompt = "👇 Напишите ваше имя или нажмите кнопку ниже:"
         else:
             msg = (
                 "👵 **Siz bilan tanishishdan bag'oyat mamnunmiz!**\n\n"
                 "Sizga o'zbekona odob va yuksak hurmat bilan murojaat qilishimiz uchun, iltimos, ismingizni yozib yuboring:\n"
                 "(Masalan: *Nigina*, *Jasur*, *Sardor*, *Nishonoyxon*...)"
             )
-        await callback.message.answer(msg)
+            skip_btn = "⏭️ O'tkazib yuborish"
+            skip_prompt = "👇 Ismingizni yozing yoki tugmani bosing:"
+
+        # Darhol yangi til va rejimdagi asosiy menyuni klaviaturaga chiqaramiz!
+        await callback.message.answer(
+            msg, 
+            reply_markup=keyboards.get_main_menu_kb("keksa", lang)
+        )
+        skip_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=skip_btn, callback_data="skip_name_entry")]
+        ])
+        await callback.message.answer(skip_prompt, reply_markup=skip_kb)
     else:
         # Bolalar rejimi
         if lang == "ru":
@@ -106,13 +137,80 @@ async def on_role_selected(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer(msg, reply_markup=keyboards.get_main_menu_kb("bola", lang))
     await callback.answer()
 
+@router.callback_query(F.data == "skip_name_entry")
+async def on_skip_name_entry(callback: types.CallbackQuery, state: FSMContext):
+    """Ism kiritishni o'tkazib yuborish va darhol asosiy menyuni tasdiqlash"""
+    await state.clear()
+    user_id = callback.from_user.id
+    user = await database.get_user(user_id)
+    lang = user.get("language", "uz") if user else "uz"
+    appeal = "Qadrdonimiz" if lang == "uz" else "Уважаемый собеседник"
+    await database.set_user_profile(user_id, appeal, "unknown", appeal)
+    await callback.message.delete()
+
+    welcome_text = (
+        "Xush kelibsiz! Marhamat, quyidagi menyudan foydalanishingiz mumkin:" 
+        if lang == "uz" else 
+        "Добро пожаловать! Вы можете воспользоваться меню ниже:"
+    )
+    await callback.message.answer(
+        welcome_text, 
+        reply_markup=keyboards.get_main_menu_kb("keksa", lang)
+    )
+    await callback.answer()
+
 @router.message(ProfileState.waiting_for_name)
 async def process_elderly_name(message: types.Message, state: FSMContext):
     """Keksa inson ismini qabul qilib, jinsi va hurmatli murojaatni aniqlash"""
-    name = message.text.strip()
+    name = (message.text or "").strip()
     user_id = message.from_user.id
     user = await database.get_user(user_id)
     lang = user.get("language", "uz") if user else "uz"
+
+    # Agar foydalanuvchi ism yozish o'rniga menyu tugmasini yoki biror buyruqni bossa:
+    if name.startswith("/") or name in ALL_MAIN_MENU_TEXTS:
+        await state.clear()
+        if name.startswith("/help") or name in ["ℹ️ Yordam", "ℹ️ Помощь", "yordam", "help"]:
+            await cmd_help(message, state)
+            return
+        if name.startswith("/role") or name in ["⚙️ Rejim / Til", "⚙️ Режим / Язык", "⚙️ Rejim / Tilni o'zgartirish"]:
+            await cmd_change_role_or_lang(message, state)
+            return
+        if name.startswith("/sos") or name in ["📞 Shifokor / SOS", "📞 Врач / SOS", "sos", "SOS"]:
+            from handlers.sos import show_sos_menu
+            await show_sos_menu(message, state)
+            return
+        if name in ["💊 Dori eslatmalari", "💊 Напоминания"]:
+            from handlers.reminders import show_reminders_menu
+            await show_reminders_menu(message, state)
+            return
+        if name in ["🧠 Xotira mashqlari", "🧠 Тренировка памяти"]:
+            from handlers.memory import start_memory_exercise
+            await start_memory_exercise(message, state)
+            return
+        if name in ["🎵 Oltin taronalar", "🎵 Ретро-музыка"]:
+            from handlers.music import show_music_menu
+            await show_music_menu(message, state)
+            return
+        if name in ["📻 Foydali videolar", "📻 Полезные видео"]:
+            from handlers.keksa_extra import show_useful_videos
+            await show_useful_videos(message, state)
+            return
+        if name in ["📿 Hikmat va Rivoyat", "📿 Мудрые притчи"]:
+            from handlers.keksa_extra import send_wisdom_story
+            await send_wisdom_story(message, state)
+            return
+        if name in ["🎙️ Ovozli suhbat", "🎙️ Голосовой собеседник"]:
+            from handlers.chat import prompt_voice
+            await prompt_voice(message)
+            return
+
+        user_type = user.get("user_type", "keksa") if user else "keksa"
+        await message.answer(
+            "Bosh menyu:" if lang == "uz" else "Главное меню:",
+            reply_markup=keyboards.get_main_menu_kb(user_type, lang)
+        )
+        return
 
     wait_msg = await message.answer(
         "⏳ Tahlil qilinmoqda..." if lang == "uz" else "⏳ Минуточку, настраиваю обращение..."
@@ -218,8 +316,10 @@ def get_help_kb(user_type: str = "keksa", lang: str = "uz") -> InlineKeyboardMar
 
 @router.message(F.text.in_(["ℹ️ Yordam", "ℹ️ Помощь", "yordam", "help", "/help"]))
 @router.message(Command("help"))
-async def cmd_help(message: types.Message):
+async def cmd_help(message: types.Message, state: Optional[FSMContext] = None):
     """Foydalanuvchi roliga moslashgan interaktiv yordam markazi"""
+    if state:
+        await state.clear()
     user_id = message.from_user.id
     user = await database.get_user(user_id)
     lang = user.get("language", "uz") if user else "uz"

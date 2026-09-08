@@ -20,9 +20,27 @@ def get_voice(lang: str = "uz", gender: str = "female") -> str:
         return VOICE_RU_MALE if gender == "male" else VOICE_RU_FEMALE
     return VOICE_UZ_MALE if gender == "male" else VOICE_UZ_FEMALE
 
-def clean_text_for_speech(text: str) -> str:
-    """Matndan markdown belgilar va maxsus simvollarni tozalash"""
-    clean = re.sub(r"[\*\_`#~]", "", text)
+def clean_text_for_speech(text: str, lang: str = "uz") -> str:
+    """Matndan markdown belgilar va maxsus simvollarni tozalash hamda o'zbek tili fonetikasini to'g'rilash"""
+    if not text:
+        return ""
+    
+    # 1. HTML teglarni tozalash
+    text = re.sub(r"<[^>]+>", "", text)
+    
+    # 2. O'zbek tili uchun oʻ va gʻ harflarini rasmiy \u02bb modifikatoriga keltirish
+    if lang == "uz":
+        MOD = "\u02bb"
+        # o va g dan keyingi barcha turdagi apostroflarni (', `, ’, ‘, ´, ʼ) \u02bb ga almashtirish va bo'shliqlarni yo'qotish
+        text = re.sub(r"([oO])\s*['`\u2019\u2018\u00b4\u02bc\u02bb]\s*", r"\1" + MOD, text)
+        text = re.sub(r"([gG])\s*['`\u2019\u2018\u00b4\u02bc\u02bb]\s*", r"\1" + MOD, text)
+        # Boshqa so'z ichidagi tutuq belgilarini (masalan, ma'lumot, sun'iy, san'at) ham to'g'rilash
+        text = re.sub(r"(?<=[a-zA-Z])\s*['`\u2019\u2018\u00b4\u02bc]\s*(?=[a-zA-Z])", MOD, text)
+
+    # 3. Markdown belgilarni tozalash (lekin \u02bb modifikatori saqlanadi)
+    clean = re.sub(r"[\*\_#~`]", "", text)
+    
+    # 4. Ortiqcha probellarni tozalash
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean
 
@@ -39,7 +57,7 @@ async def text_to_speech_bytes(
     Diskka yozmaydi, juda tez va PermissionError lardan holi!
     """
     try:
-        clean_text = clean_text_for_speech(text)
+        clean_text = clean_text_for_speech(text, lang=lang)
         if not clean_text:
             return None
 
